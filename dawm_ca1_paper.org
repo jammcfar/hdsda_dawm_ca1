@@ -1,0 +1,23 @@
+#+TITLE: Dawm Ca1 Paper
+
+* Introduction
+
+This section will use a groceries transaction dataset.
+
+The apriori algorithm will be used here.
+
+* Tidy data principles
+- Each variable (attribute, feature) measured should be in one column
+- Each different observation of that variable should be in a different row
+- There should be one table for each topic of interest.  For example, a different table for a person’s finance and health data
+- If you have multiple tables, they should include a column that allows them to be linked.  For the example in 3 above we might link a finance table and a health table with a common identifier such as a ‘person ID’
+
+  When importing the dataseta
+
+  It was immediately apparent that the dataset was in wide format.
+  There is only one topic of interest, so splitting and linking tables was not necessary.
+
+  After fixing the dates column, which was not parsed correctly upon import, a row ID column was created. The dataset now had 4 variables; the id column, dates, items and the presence/absence of an item.  The data was transformed to a long-format. When transformed in this way, each variable forms a column and each observation forms a row. This is Codd's third normal form.
+
+  To convert the tidy dataset to a format that could be converted to a transaction object, the data was expanded into wide format, with one column per item.
+
