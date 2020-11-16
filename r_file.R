@@ -65,6 +65,7 @@ read.table("Groceries.csv",
 
 date_rgx <- "\\d+/\\d+/\\d+"
 
+
 g_tidy <-
   g_in %>%
   as_tibble() %>%
@@ -155,6 +156,8 @@ glimpse(df_samp)
 
 colnames(df_samp) <- c(col_strings_clean, "target")
 
+df_samp
+
 ##inspect the data
 common_na_strings
 df_nas <-
@@ -165,3 +168,30 @@ df_nas <-
 vis_miss(x = df_nas)
 
 View(df_nas)
+
+##try bank dataset==================================================
+df_bank_in <-
+    read_delim(here("bank-additional-full.csv"),
+               delim = ";")
+
+rand_samp = sample(1:nrow(df_bank_in),
+                   size = 10000,
+                   replace = F
+                   )
+
+df_bank_samp <- df_bank_in[rand_samp, ]
+
+colnames(df_bank_samp) <- snakecase::to_snake_case(colnames(df_bank_samp))
+
+##remove this column, as per dataset documentation
+df_bank_in$duration <- NULL
+
+funModeling::status(df_bank_in)
+
+custom_na_strings <- c(common_na_strings, "nonexistent",  "unknown")
+
+df_nas <-
+  df_bank_samp %>% replace_with_na_all(
+                condition = ~.x %in% custom_na_strings)
+
+funModeling::status(df_nas)
