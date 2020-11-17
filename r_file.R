@@ -11,6 +11,7 @@ library(naniar)
 library(arules)
 library(arulesViz)
 library(shinythemes)
+library(naivebayes)
 
 ### Part 1: Association rules
 
@@ -195,3 +196,79 @@ df_nas <-
                 condition = ~.x %in% custom_na_strings)
 
 funModeling::status(df_nas)
+
+##convert all characters to factors
+df_clean <-
+  df_nas %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate(y = as_factor(y))
+
+## lets try tidymodels. etc
+df_split <- initial_split(df_clean, prop = 3/4)
+
+# Create data frames for the two sets:
+df_train <- training(df_split)
+df_test  <- testing(df_split)
+
+bank_rec <-
+  recipe(y ~ ., data = df_train) %>%
+  update_role(y, new_role = "outcome") %>%
+  step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors())
+
+nb_mod <-
+  discrim::naive_Bayes() %>%
+  set_engine("naivebayes")
+
+rf_mod <-
+  rand_forest(mtry = 3,
+              trees = 200,
+              min_n = 20) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+bank_nb_workflow <-
+  workflow() %>%
+  add_model(nb_mod) %>%
+  add_recipe(bank_rec)
+
+##step_novel
+
+bank_fit <-
+  bank_nb_workflow %>%
+  fit(data = df_train)
+
+nb_pred <-
+    predict(bank_fit,
+            df_test,
+            type = "prob") %>%
+  bind_cols(df_test %>% select(y))
+
+nb_pred %>%
+  roc_curve(truth = y, .pred_no) %>%
+  autoplot()
+
+#try randomforest
+
+bank_rf_workflow <-
+  workflow() %>%
+  add_model(rf_mod) %>%
+  add_recipe(bank_rec)
+
+##step_novel
+
+bank_rf_fit <-
+  bank_rf_workflow %>%
+  fit(data = df_train)
+
+rf_pred <-
+    predict(bank_rf_fit,
+            df_test,
+            type = "prob") %>%
+  bind_cols(df_test %>% select(y))
+
+rf_pred %>%
+  roc_curve(truth = y, .pred_no) %>%
+  autoplot()
