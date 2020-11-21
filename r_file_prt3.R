@@ -10,6 +10,9 @@ library(here)
 library(naniar)
 library(naivebayes)
 library(recipeselectors)
+library(themis)
+##add a user choice here, incase he doesnt want to DL off github or dont if it goes in appendix
+"https://archive.ics.uci.edu/ml/machine-learning-databases/00222/bank-additional.zip"
 
 df_bank_in <-
     read_delim(here("bank-additional-full.csv"),
@@ -47,7 +50,7 @@ df_bank_nas <-
 
 ##convert all characters to factors
 df_clean <-
-  df_nas %>%
+  df_bank_nas %>%
   mutate_if(is.character, as.factor) %>%
   mutate(y = as_factor(y))
 
@@ -64,10 +67,11 @@ bank_rec <-
   step_novel(all_predictors(), -all_numeric()) %>%
   step_unknown(all_predictors(), -all_numeric()) %>%
   step_dummy(all_nominal(), -all_outcomes()) %>%
-  step_zv(all_predictors()) %>%
-  step_select_roc(all_predictors(),
-                  threshold = 0.7,
-                  outcome = "y")
+  step_zv(all_predictors()) #%>%
+#  step_select_roc(all_predictors(),
+#                  threshold = 0.6,
+#                  outcome = "y") %>%
+#  step_rose(y) #actually made no difference to rpart?
 
 nb_mod <-
   discrim::naive_Bayes() %>%
@@ -80,26 +84,32 @@ rf_mod <-
   set_engine("ranger") %>%
   set_mode("classification")
 
-bank_nb_workflow <-
-  workflow() %>%
-  add_model(nb_mod) %>%
-  add_recipe(bank_rec)
+rpart_mod <-
+  decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("classification")
 
-##step_novel
 
-bank_fit <-
-  bank_nb_workflow %>%
-  fit(data = df_train)
-
-nb_pred <-
-    predict(bank_fit,
-            df_test,
-            type = "prob") %>%
-  bind_cols(df_test %>% select(y))
-
-nb_pred %>%
-  roc_curve(truth = y, .pred_no) %>%
-  autoplot()
+#bank_nb_workflow <-
+  #workflow() %>%
+  #add_model(nb_mod) %>%
+  #add_recipe(bank_rec)
+#
+###step_novel
+#
+#bank_fit <-
+  #bank_nb_workflow %>%
+  #fit(data = df_train)
+#
+#nb_pred <-
+    #predict(bank_fit,
+            #df_test,
+            #type = "prob") %>%
+  #bind_cols(df_test %>% select(y))
+#
+#nb_pred %>%
+  #roc_curve(truth = y, .pred_no) %>%
+  #autoplot()
 
 #try randomforest
 
@@ -121,5 +131,28 @@ rf_pred <-
   bind_cols(df_test %>% select(y))
 
 rf_pred %>%
+  roc_curve(truth = y, .pred_no) %>%
+  autoplot()
+
+
+##decision tree now
+bank_tr_workflow <-
+  workflow() %>%
+  add_model(rpart_mod) %>%
+  add_recipe(bank_rec)
+
+##step_novel
+
+bank_tr_fit <-
+  bank_tr_workflow %>%
+  fit(data = df_train)
+
+tr_pred <-
+    predict(bank_tr_fit,
+            df_test,
+            type = "prob") %>%
+  bind_cols(df_test %>% select(y))
+
+tr_pred %>%
   roc_curve(truth = y, .pred_no) %>%
   autoplot()

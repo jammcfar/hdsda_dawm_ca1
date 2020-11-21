@@ -12,12 +12,39 @@ The apriori algorithm will be used here.
 - There should be one table for each topic of interest.  For example, a different table for a person’s finance and health data
 - If you have multiple tables, they should include a column that allows them to be linked.  For the example in 3 above we might link a finance table and a health table with a common identifier such as a ‘person ID’
 
-  When importing the dataseta
+  When importing the dataset, arguments were used to fill in NAs
+  An essential part of cleaning and further processing was the removal of dates. This was accomplished with a regular expression. These were duplicated over the transactions, so an ID column was created to use instead.
 
-  It was immediately apparent that the dataset was in wide format.
+  It was immediately apparent that the dataset was in wide format. To conform to tidy-principles, there should be a single columns for items and transaction ID.
   There is only one topic of interest, so splitting and linking tables was not necessary.
+
+
 
   After fixing the dates column, which was not parsed correctly upon import, a row ID column was created. The dataset now had 4 variables; the id column, dates, items and the presence/absence of an item.  The data was transformed to a long-format. When transformed in this way, each variable forms a column and each observation forms a row. This is Codd's third normal form.
 
-  To convert the tidy dataset to a format that could be converted to a transaction object, the data was expanded into wide format, with one column per item.
-
+  To convert the tidy dataset to a format that could be converted to a transaction object, we had to abandon the principle of ... and the data was expanded into wide format, with one column per item and one row per transaction. Converting to a list is another possible route, but is slightly more code heavy.
+
+The interestingness measures used must be treated cautiously. Many irrelevent patterns can be exposed here and SMEs should be consulted https://www.researchgate.net/deref/https%3A%2F%2Flirias.kuleuven.be%2Fbitstream%2F123456789%2F394442%2F1%2Fobjectively-evaluating.pdf
+
+What is actionable, trivial and inexplicable.
+Trivial are very obvious. Inexplicable ones make no sense (maybe one customer keeps buying the same combo). Actionable ones only seem obvious when discovered.
+
+Vegetables may be too broad a category, which is why it is so heavily represented.
+
+
+* Apriori
+
+To justify support, we can use the rule of thumb that if an item was purchased twice a day, it might be worth looking at.
+Vegtables are very frequent, so we will put some emphasis on that.
+In terms of support, vegtables were an outlier.
+
+
+Lift can be misleading...
+
+* Section 3
+  CART probably better than C5.0 in case of missing values; http://mercury.webster.edu/aleshunas/Support%20Materials/C4.5/Nguyen-Presentation%20Data%20mining.pdf
+  CART Trees are also used in Random forest, so it will make for a cleaner comparison (https://www.stat.berkeley.edu/~breiman/randomforest2001.pdf) http://mercury.webster.edu/aleshunas/Support%20Materials/C4.5/Nguyen-Presentation%20Data%20mining.pdf.
+  However, the missing values and tree growth are still done differently. https://stats.stackexchange.com/questions/98953/why-doesnt-random-forest-handle-missing-values-in-predictors
+    Well use rpart, which may have some slight differences, but is more-or-less CART.
+
+Feature selection actually worsened performance for rpart slightly. At the least, it did not imporve things. Show an example of this in appendix.
