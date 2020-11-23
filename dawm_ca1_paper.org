@@ -1,47 +1,57 @@
 #+TITLE: Dawm Ca1 Paper
 
-* Introduction
+* Part 1
+** Introduction
+This section is an application of Tidy data rules and market-basket analysis, using a modified version of the Groceries dataset. We will first process the data, using the principles layed out in Wickham (XXX). Following this, the apriori algorithm will be used to generate association rules. It is hoped that we will be able to find actionable rules as a result of this analysis.
 
-This section will use a groceries transaction dataset.
-
-The apriori algorithm will be used here.
-
-* Tidy data principles
+** Data processing and Tidy data principles
 - Each variable (attribute, feature) measured should be in one column
 - Each different observation of that variable should be in a different row
 - There should be one table for each topic of interest.  For example, a different table for a person’s finance and health data
 - If you have multiple tables, they should include a column that allows them to be linked.  For the example in 3 above we might link a finance table and a health table with a common identifier such as a ‘person ID’
 
-  When importing the dataset, arguments were used to fill in NAs
-  An essential part of cleaning and further processing was the removal of dates. This was accomplished with a regular expression. These were duplicated over the transactions, so an ID column was created to use instead.
+Our path to generating a transactions object from the raw data was as follows: Data.frame -> Tidy Tibble -> List -> Transactions. It should be noted that tidy-rules are focused on data frames. In our case, it would be more parsimonious to use a workflow of Datalines -> List -> Transactions (see appendix 1).
+The dataset, when imported, already conformed to one tidy-data principle; that we have one table per topic of interest. Since we only have one topic of interest though, the principle of having column linkages between tables is not applicable.  
+  An essential part of cleaning and further processing was the removal of dates. This was accomplished with a regular expression. These were duplicated over the transactions, so an ID column was created and the dates discarded.
+  It was immediately apparent that the dataset was in wide format. We identified "item" and "id_var" as unique variables. Furthermore, each instance of an "item" was a unique observation. To conform to tidy-principles, there should be a single column for each variable (i.e. long-format). When this structure is adopted, each variable will be in one column and each observation of an item will have its own row, and it will be paired with an ID variable identifying the transaction. This is Codd's third normal form.
+ To coerce the dataset to transactions object, we first converted it to a list object, with one entry per transaction.
 
-  It was immediately apparent that the dataset was in wide format. To conform to tidy-principles, there should be a single columns for items and transaction ID.
-  There is only one topic of interest, so splitting and linking tables was not necessary.
+** Generation and analysis of association rules
+A brief exploration of the transactions object was first undertaken. 
+(do a histogram and summary tables here). It was apparent that vegetables appeared with much greater frequency that the other categories. They may be too broad a category, which is why it is so heavily represented.
+In setting the parameters for the apriori algorithm, these were set erring on the side of overgenerating of rules. This was done because the dataset was not too large and the rules could be filtered afterwards. Support was set at 0.072. This was a rule-of-thumb, where items that appear at least twice a day in transactions would be worthy of consideration. Confidence was set at 0.25, to simply filter out rules which combine items less than 25% of the time. Rule lengths less than 2 were blocked as the were certain to be uninteresting. The max length of rules was increased from the default on the off-chance that large rule sets were generated.
 
+The application of the a-priori algorithm yielded some interesting rules from the data, some of which may be actionable.
+(Combination of supp-cof-lift scatter)
+The combination plot shows that there a number of items on the confidence-support border which may be of interest. The two-key plot shows that these are primarily rules composed of three or four items.
 
+Vegetables appeared heavily in the assocation rules that were generated. There were a few possible actionable rules that included them. {aluminum foil,sandwich bags,vegetables}  => {cheeses} is one possible actionable rule.
 
-  After fixing the dates column, which was not parsed correctly upon import, a row ID column was created. The dataset now had 4 variables; the id column, dates, items and the presence/absence of an item.  The data was transformed to a long-format. When transformed in this way, each variable forms a column and each observation forms a row. This is Codd's third normal form.
-
-  To convert the tidy dataset to a format that could be converted to a transaction object, we had to abandon the principle of ... and the data was expanded into wide format, with one column per item and one row per transaction. Converting to a list is another possible route, but is slightly more code heavy.
+When vegetables were excluded, other actionable rules could be discerned.  {ice cream,pasta}               => {paper towels} is one possible rule set.
+Limiting ourselves to looking at pairs of items makes things more apparent. Pasta -> Paper Towels is actionable. Juice -> Yoghurt is arguably actionable. Other items are trivial such as cheeses -> spaghetti sauce.
 
 The interestingness measures used must be treated cautiously. Many irrelevent patterns can be exposed here and SMEs should be consulted https://www.researchgate.net/deref/https%3A%2F%2Flirias.kuleuven.be%2Fbitstream%2F123456789%2F394442%2F1%2Fobjectively-evaluating.pdf
 
 What is actionable, trivial and inexplicable.
 Trivial are very obvious. Inexplicable ones make no sense (maybe one customer keeps buying the same combo). Actionable ones only seem obvious when discovered.
 
-Vegetables may be too broad a category, which is why it is so heavily represented.
-
-
-* Apriori
-
-To justify support, we can use the rule of thumb that if an item was purchased twice a day, it might be worth looking at.
-Vegtables are very frequent, so we will put some emphasis on that.
-In terms of support, vegtables were an outlier.
-
-
 Lift can be misleading...
 
-* Section 3
+* Part 3
+** Introduction
+In this section, we will attempt to predict the success of a bank marketing campaign using two different machine learning algorithms; the CART decision tree and Random Forest.
+
+** Dataset
+The dataset chosen was a 10,000 row, random subset of the the well-known Portoguese Bank dataset as described in 
+  S. Moro, P. Cortez and P. Rita. A Data-Driven Approach to Predict the Success of Bank Telemarketing. Decision Support Systems (2014), doi:10.1016/j.dss.2014.03.001.
+The goal of this dataset is to predict the classification of successful sales by a bank telemarketing campaign. Note that this analysis is not comparable to the original study, as their are significant differences in the available variables, dataset length and scope.
+This dataset contains a mixture of 20 numeric and categorical variables, with some outliers. Dummy variables were used to handle the categorical variable. See appendix X for more details. The data also displayed a strong class imbalance. These issues influenced our choice of model in the next section.
+
+** Choice of models
+A choice of imputation method could not be justified in this case, so models were chosen based on their efficacy at handling them.
+
+
+  
   CART probably better than C5.0 in case of missing values; http://mercury.webster.edu/aleshunas/Support%20Materials/C4.5/Nguyen-Presentation%20Data%20mining.pdf
   CART Trees are also used in Random forest, so it will make for a cleaner comparison (https://www.stat.berkeley.edu/~breiman/randomforest2001.pdf) http://mercury.webster.edu/aleshunas/Support%20Materials/C4.5/Nguyen-Presentation%20Data%20mining.pdf.
   However, the missing values and tree growth are still done differently. https://stats.stackexchange.com/questions/98953/why-doesnt-random-forest-handle-missing-values-in-predictors
