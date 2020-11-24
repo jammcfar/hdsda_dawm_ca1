@@ -30,7 +30,6 @@ g_in <-
 # A regex to grab the dates from malformed column
 date_rgx <- "\\d+/\\d+/\\d+"
 
-
 g_datefix <-
   g_in %>%
   as_tibble() %>%

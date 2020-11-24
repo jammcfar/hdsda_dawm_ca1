@@ -12,6 +12,7 @@ library(naniar)
 library(recipeselectors)
 library(themis)
 library(corrr)
+library(C50)
 
 ## add a user choice here, incase he doesnt want to DL off github or dont if it goes in appendix
 "https://archive.ics.uci.edu/ml/machine-learning-databases/00222/bank-additional.zip"
@@ -19,83 +20,90 @@ library(corrr)
 df_bank_in <-
   read_delim(here("bank-additional-full.csv"),
     delim = ";"
-  )
-
-rand_samp <- sample(1:nrow(df_bank_in),
-  size = 10000,
-  replace = F
-)
-
-df_bank_samp <- df_bank_in[rand_samp, ]
+  ) %>%
+  sample_n(10000)
 
 ## set colname to snakecase, as per tidy style guide
-colnames(df_bank_samp) <- snakecase::to_snake_case(colnames(df_bank_samp))
+colnames(df_bank_in) <- snakecase::to_snake_case(colnames(df_bank_in))
 
-## remove this column, and set pdays to NA, as per dataset documentation
-## justification for pdays as missing https://medium.com/@abbdar/first-steps-in-machine-learning-predicting-subscription-for-bank-deposits-866516b90e4
-
-df_bank_proc <-
-  df_bank_samp %>%
-  mutate(pdays = if_else(pdays != 999,
-    pdays,
-    NA_real_
-  )) %>%
-  select(-duration)
-
-# funModeling::status(df_bank_in)
-
+# some unusual na strings present in data
 custom_na_strings <- c(common_na_strings, "nonexistent", "unknown")
 
-df_bank_nas <-
-  df_bank_proc %>% replace_with_na_all(
-    condition = ~ .x %in% custom_na_strings
-  )
-
-funModeling::status(df_bank_nas)
-
-## convert all characters to factors
+## remove this colun, as per dataset documentation
 ## also remove pdays and poutcome, these are problematic
 ## and their correct encoding relies on SME knowledge
-df_clean <-
-  df_bank_nas %>%
-  select(-pdays, -poutcome) %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(y = as_factor(y))
+df_bank_proc <-
+  df_bank_in %>%
+  select(
+    -duration,
+    -pdays,
+    -poutcome
+  ) %>%
+  replace_with_na_all(
+    condition = ~ .x %in% custom_na_strings
+  ) %>%
+  mutate_if(is.character, as.factor)
 
 # Checking for intercorrelations (stick in appendix)
-glimpse(df_clean) %>%
+glimpse(df_bank_proc) %>%
   select(where(is.numeric)) %>%
   correlate() %>%
   pivot_longer(age:nr_employed) %>%
   arrange(desc(value))
 
 ## lets try tidymodels. etc
-df_split <- initial_split(df_clean, prop = 3 / 4)
+bank_split <- initial_split(df_bank_proc, prop = 3 / 4)
 
 # Create data frames for the two sets:
-df_train <- training(df_split)
-df_test <- testing(df_split)
+df_train <- training(bank_split)
+df_test <- testing(bank_split)
 
-
+# Recipe to ready data for modelling
 bank_rec <-
   recipe(y ~ ., data = df_train) %>%
-    update_role(y, new_role = "outcome") %>%
-    # step_novel(all_predictors(), -all_numeric()) %>%
-    step_unknown(all_predictors(), -all_numeric()) %>%
-    step_dummy(all_nominal(), -all_outcomes()) %>%
-    step_zv(all_predictors()) %>%
+  update_role(y, new_role = "outcome") %>%
+  # step_novel(all_predictors(), -all_numeric()) %>%
+  step_unknown(all_predictors(), -all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors())
 
-    #  step_select_roc(all_predictors(),
-    #                  threshold = 0.6,
-    #                  outcome = "y") %>%
-    #  step_rose(y) #actually made no difference to rpart?
+#  step_select_roc(all_predictors(),
+#                  threshold = 0.6,
+#                  outcome = "y") %>%
+#  step_rose(y) #actually made no difference to rpart?
 
-    # tree based models can handle these bninaries as numerics
+# tree based models can handle these bninaries as numerics
 
-    # Pre-process the data
-    bank_prep() <- prep(bank_rec, training = df_train)
+## Pre-process the data
+bank_prep <- prep(bank_rec, training = df_train)
 df_baked_train <- bake(bank_prep, df_train)
 
+# probably need to factorise variables first
+C5.0(
+  x = df_baked_train[, -43],
+  y = as.factor(df_baked_train[, 43])
+)
+
+## Apply the rpart model once
+
+c5_mod <-
+  decision_tree() %>%
+  set_engine("C5.0") %>%
+  set_mode("classification") %>%
+  translate()
+
+c5_workflow <-
+  workflow() %>%
+  add_model(c5_mod) %>%
+  add_recipe(bank_rec)
+
+## step_novel
+
+c5_fit <-
+  c5_workflow %>%
+  fit(data = df_train)
+
+summary(bank_tree_fit)
 
 
 foo_train_recipe <- prep(pre_processor(df_train), training = df_train)
@@ -112,7 +120,8 @@ df_train_cvs <-
 
 nb_mod <-
   discrim::naive_Bayes() %>%
-  set_engine("naivebayes")
+  set_engine("naivebayes") %>%
+  translate()
 
 rf_mod <-
   rand_forest(
@@ -121,11 +130,6 @@ rf_mod <-
     min_n = 20
   ) %>%
   set_engine("ranger") %>%
-  set_mode("classification")
-
-rpart_mod <-
-  decision_tree() %>%
-  set_engine("rpart") %>%
   set_mode("classification")
 
 

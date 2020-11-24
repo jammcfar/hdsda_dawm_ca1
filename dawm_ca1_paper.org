@@ -50,6 +50,8 @@ This dataset contains a mixture of 20 numeric and categorical variables, with so
 ** Choice of models
 A choice of imputation method could not be justified in this case, so models were chosen based on their efficacy at handling them.
 
+C4.5 better for imbalanced data, so use c5.0
+https://www3.nd.edu/~nchawla/papers/ECML08.pdf
 
   
   CART probably better than C5.0 in case of missing values; http://mercury.webster.edu/aleshunas/Support%20Materials/C4.5/Nguyen-Presentation%20Data%20mining.pdf
