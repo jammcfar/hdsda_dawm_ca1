@@ -54,9 +54,17 @@ glimpse(df_bank_proc) %>%
 ## lets try tidymodels. etc
 bank_split <- initial_split(df_bank_proc, prop = 3 / 4)
 
+
 # Create data frames for the two sets:
 df_train <- training(bank_split)
 df_test <- testing(bank_split)
+
+
+df_facts <- df_train %>% select(
+  where(is.factor),
+  -y
+)
+fact_names <- paste(colnames(df_facts), sep = "|")
 
 # Recipe to ready data for modelling
 bank_rec <-
@@ -65,7 +73,11 @@ bank_rec <-
   # step_novel(all_predictors(), -all_numeric()) %>%
   step_unknown(all_predictors(), -all_numeric()) %>%
   step_dummy(all_nominal(), -all_outcomes()) %>%
-  step_zv(all_predictors())
+  step_zv(all_predictors()) %>%
+  step_num2factor(matches(fact_names),
+    transform = function(x) x + 1,
+    levels = c("0", "1")
+  )
 
 #  step_select_roc(all_predictors(),
 #                  threshold = 0.6,
@@ -77,12 +89,54 @@ bank_rec <-
 ## Pre-process the data
 bank_prep <- prep(bank_rec, training = df_train)
 df_baked_train <- bake(bank_prep, df_train)
+bank_test_prep <- prep(bank_rec, training = df_train)
+df_baked_test <- bake(bank_prep, df_test)
 
 # probably need to factorise variables first
-C5.0(
-  x = df_baked_train[, -43],
-  y = as.factor(df_baked_train[, 43])
-)
+single_c5 <-
+  C5.0(y ~ .,
+    data = df_baked_train
+  )
+plot(single_c5)
+
+summary(single_c5)
+
+c5_res_probs <-
+  predict(single_c5, df_baked_test, type = "prob") %>%
+  as_tibble()
+
+c5_single_pred <-
+  df_baked_test %>%
+  select(y) %>%
+  bind_cols(c5_res_probs) %>%
+  bind_cols(predict(single_c5, df_baked_test)) %>%
+  rename(Actual = y, Predicted = "...4")
+
+c5_auc <-
+  c5_single_pred %>%
+  roc_auc(
+    truth = Actual,
+    no
+  )
+
+num_mets <- metric_set(bal_accuracy, kap, sens, spec)
+
+c50_mets <-
+  bind_rows(
+    c5_auc,
+    c5_single_pred %>%
+      num_mets(Actual, estimate = Predicted)
+  )
+
+c5_single_pred %>%
+  roc_curve(
+    truth = Actual,
+    estimate = no
+  ) %>%
+  autoplot()
+
+# use https://www.tidymodels.org/start/tuning/ to tune a tree
+
 
 ## Apply the rpart model once
 
