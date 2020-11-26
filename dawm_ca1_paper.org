@@ -60,3 +60,6 @@ https://www3.nd.edu/~nchawla/papers/ECML08.pdf
     Well use rpart, which may have some slight differences, but is more-or-less CART.
 
 Feature selection actually worsened performance for rpart slightly. At the least, it did not imporve things. Show an example of this in appendix.
+
+** Analysis
+Both models were first ran in a hold-back workflow, with default values for both to establish baselines. They were then both ran a second time, with cross-validation and tuned within the cv folds. Monte-Carlo cross-validation was used as it was not known if the dataset had any original ordering.

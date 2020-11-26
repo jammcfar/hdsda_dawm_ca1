@@ -9,13 +9,34 @@ library(tidymodels)
 library(here)
 library(naniar)
 ## library(naivebayes)
-library(recipeselectors)
-library(themis)
+## library(recipeselectors)
+# library(themis)
 library(corrr)
 library(C50)
+library(vip)
+library(ranger)
 
 ## add a user choice here, incase he doesnt want to DL off github or dont if it goes in appendix
 "https://archive.ics.uci.edu/ml/machine-learning-databases/00222/bank-additional.zip"
+
+
+## function to tidy up some output
+tidyPreds <- function(data, target, model_fit, model_name, wrkflw_name) {
+  temp_probs <- predict(model_fit, data, type = "prob") %>% as_tibble()
+  temp_pred <- predict(model_fit, data)
+
+  temp_tib <-
+    data %>%
+    select(target) %>%
+    bind_cols(temp_pred) %>%
+    bind_cols(temp_probs) %>%
+    mutate(
+      model = model_name,
+      wrkflw = wrkflw_name
+    )
+
+  return(temp_tib)
+}
 
 df_bank_in <-
   read_delim(here("bank-additional-full.csv"),
@@ -42,7 +63,8 @@ df_bank_proc <-
   replace_with_na_all(
     condition = ~ .x %in% custom_na_strings
   ) %>%
-  mutate_if(is.character, as.factor)
+  mutate_if(is.character, as.factor) %>%
+  distinct() # expensive, removes 21 rows
 
 # Checking for intercorrelations (stick in appendix)
 glimpse(df_bank_proc) %>%
@@ -70,50 +92,334 @@ fact_names <- paste(colnames(df_facts), sep = "|")
 bank_rec <-
   recipe(y ~ ., data = df_train) %>%
   update_role(y, new_role = "outcome") %>%
-  # step_novel(all_predictors(), -all_numeric()) %>%
-  step_unknown(all_predictors(), -all_numeric()) %>%
-  step_dummy(all_nominal(), -all_outcomes()) %>%
   step_zv(all_predictors()) %>%
-  step_num2factor(matches(fact_names),
-    transform = function(x) x + 1,
-    levels = c("0", "1")
-  )
+  step_knnimpute(all_predictors())
 
-#  step_select_roc(all_predictors(),
-#                  threshold = 0.6,
-#                  outcome = "y") %>%
-#  step_rose(y) #actually made no difference to rpart?
+## tree based models can handle these bninaries as numerics
+## also, since tree models are a series of if-else, dont have to dummy
+## https://www.slideshare.net/Work-Bench/i-dont-want-to-be-a-dummy-encoding-predictors-for-trees
 
-# tree based models can handle these bninaries as numerics
-
-## Pre-process the data
+## Pre-process the data for simple train-test runs
 bank_prep <- prep(bank_rec, training = df_train)
 df_baked_train <- bake(bank_prep, df_train)
 bank_test_prep <- prep(bank_rec, training = df_train)
 df_baked_test <- bake(bank_prep, df_test)
 
-# probably need to factorise variables first
+# single C5.0===================================================================
 single_c5 <-
   C5.0(y ~ .,
     data = df_baked_train
   )
+
+
+c5_single_train_tib <-
+  tidyPreds(
+    df_baked_train,
+    "y",
+    single_c5,
+    "C5.0",
+    "Hold-back"
+  )
+
+
+c5_single_tib <-
+  tidyPreds(
+    df_baked_test,
+    "y",
+    single_c5,
+    "C5.0",
+    "Hold-back"
+  )
+
+
 plot(single_c5)
 
 summary(single_c5)
+## use https://www.tidymodels.org/start/tuning/ to tune a tree
+## tidymodels only provides for tuning min_n
+## tuned c5.0===================================================================
 
-c5_res_probs <-
-  predict(single_c5, df_baked_test, type = "prob") %>%
-  as_tibble()
+c5_tune <-
+  decision_tree(
+    min_n = tune()
+  ) %>%
+  set_engine("C5.0") %>%
+  set_mode("classification")
 
-c5_single_pred <-
+c5_tune_param <-
+  grid_random(min_n(), size = 5)
+
+c5_folds <- mc_cv(df_train,
+  props = 0.75,
+  times = 5
+)
+
+c5_cv_wrkflw <- workflow() %>%
+  add_model(c5_tune) %>%
+  add_recipe(bank_rec)
+
+c5_cv_res <-
+  c5_cv_wrkflw %>%
+  tune_grid(
+    resamples = c5_folds,
+    grid = c5_tune_param
+  )
+
+c5_best <-
+  c5_cv_res %>%
+  show_best("roc_auc")
+
+## get within fold information
+c5_best_info <-
+  c5_best %>%
+  select(
+    auc = mean,
+    auc_se = std_err
+  ) %>%
+  mutate(
+    model = "C5.0",
+    wrkflw = "Tuned-CV"
+  ) %>%
+  top_n(1, auc)
+
+c5_wrkflw_best <-
+  c5_cv_wrkflw %>%
+  finalize_workflow(c5_best[1, ])
+
+c5_best_fit <-
+  c5_wrkflw_best %>%
+  fit(df_train)
+
+c5_best_fit %>%
+  pull_workflow_fit() %>%
+  vip()
+
+c5_wrkflw_best %>%
+  last_fit()
+
+c5_last_fit <-
+  c5_wrkflw_best %>%
+  last_fit(bank_split)
+
+tidyFolds <- function(fit, model_name, wrkflw_name) {
+  temp_tib <-
+    fit$.predictions[[1]] %>%
+    select(
+      Actual = y,
+      no = .pred_no,
+      yes = .pred_yes,
+      Predicted = .pred_class
+    ) %>%
+    mutate(
+      model = model_name,
+      wrkflw = wrkflw_name
+    )
+
+  return(temp_tib)
+}
+
+c5_fold_tib <-
+  tidyFolds(c5_last_fit, "C5.0", "Tuned-CV")
+
+#
+# c5_fold_tib <-
+# c5_last_fit$.predictions[[1]] %>%
+# select(
+# Actual = y,
+# no = .pred_no,
+# yes = .pred_yes,
+# Predicted = .pred_class
+# ) %>%
+# mutate(
+# model = "C5.0",
+# wrkflw = "Tuned-CV"
+# )
+#
+## collect results for this
+# c5_last_fit %>%
+# collect_predictions() %>%
+# roc_curve(y, .pred_no) %>%
+# autoplot()
+#
+#
+# c5_last_fit %>%
+# collect_metrics()
+#
+#
+# c5_res_probs <-
+# predict(c5_last_fit, df_baked_test, type = "prob") %>%
+# as_tibble()
+#
+# c5_single_pred <-
+# df_baked_test %>%
+# select(y) %>%
+# bind_cols(c5_res_probs) %>%
+# bind_cols(predict(single_c5, df_baked_test)) %>%
+# rename(Actual = y, Predicted = "...4") %>%
+# mutate(
+# model = "C5.0",
+# wrkflw = "Tuned"
+# )
+
+
+
+
+## Random forest
+## Get n cores for ranger
+cores_found <- parallel::detectCores()
+
+# first do rf without tuning
+single_rf <-
+  ranger::ranger(y ~ .,
+    data = df_baked_train,
+    importance = "impurity",
+    probability = T
+  )
+
+single_rf %>%
+  vip()
+
+summary(single_rf)
+
+
+rf_single_probs <-
+  predict(single_rf,
+    df_baked_test,
+    type = "response"
+  )
+
+
+rf_single_tib <-
   df_baked_test %>%
   select(y) %>%
-  bind_cols(c5_res_probs) %>%
-  bind_cols(predict(single_c5, df_baked_test)) %>%
-  rename(Actual = y, Predicted = "...4")
+  bind_cols(rf_single_probs$predictions %>% as_tibble()) %>%
+  mutate(Predicted = as_factor(if_else(yes > 0.5, "yes", "no"))) %>%
+  rename(Actual = y) %>%
+  mutate(
+    model = "Ranger",
+    wrkflw = "Hold-back"
+  )
+#
+# rf_auc <-
+# rf_single_tib %>%
+# roc_auc(
+# truth = Actual,
+# no
+# )
+#
+# num_mets <- metric_set(bal_accuracy, kap, sens, spec)
+#
+# rf_mets <-
+# bind_rows(
+# rf_auc,
+# rf_single_tib %>%
+# num_mets(Actual, estimate = Predicted)
+# )
+#
+#
+#
+#
+# rf_res_probs$predictions
+#
+# summary(rf_res_probs)
+#
+# table(
+# df_baked_test$y,
+# rf_res_probs$predictions
+# )
+#
+#
+# c5_single_pred <-
+# df_baked_test %>%
+# select(y) %>%
+# bind_cols(c5_res_probs) %>%
+# bind_cols(predict(single_c5, df_baked_test)) %>%
+# rename(Actual = y, Predicted = "...4")
+#
+# c5_auc <-
+# c5_single_pred %>%
+# roc_auc(
+# truth = Actual,
+# no
+# )
+#
+# num_mets <- metric_set(bal_accuracy, kap, sens, spec)
+#
+## tuned rf model
+# prep model
+rf_mod <-
+  rand_forest(
+    mtry = tune(),
+    min_n = tune()
+  ) %>%
+  set_engine("ranger",
+    num.threads = cores_found,
+    importance = "impurity"
+  ) %>%
+  set_mode("classification")
 
-c5_auc <-
-  c5_single_pred %>%
+rf_tune_param <-
+  grid_random(mtry(range = c(2, 8)), min_n(), size = 10)
+
+rf_cv_wrkflw <-
+  workflow() %>%
+  add_model(rf_mod) %>%
+  add_recipe(bank_rec)
+
+rf_cv_res <-
+  rf_cv_wrkflw %>%
+  tune_grid(
+    resamples = c5_folds,
+    grid = rf_tune_param
+  )
+
+rf_best <-
+  rf_cv_res %>%
+  show_best("roc_auc")
+
+rf_best_info <-
+  rf_best %>%
+  select(
+    auc = mean,
+    auc_se = std_err
+  ) %>%
+  mutate(
+    model = "Ranger",
+    wrkflw = "Tuned-CV"
+  ) %>%
+  top_n(1, auc)
+
+rf_wrkflw_best <-
+  rf_cv_wrkflw %>%
+  finalize_workflow(rf_best[1, ])
+
+rf_best_fit <-
+  rf_wrkflw_best %>%
+  fit(df_train)
+
+rf_best_fit %>%
+  pull_workflow_fit() %>%
+  vip()
+
+rf_last_fit <-
+  rf_wrkflw_best %>%
+  last_fit(bank_split)
+
+rf_fold_tib <-
+  tidyFolds(rf_last_fit, "Ranger", "Tuned-CV")
+
+## Eval and compare
+preds_all <-
+  bind_rows(
+    c5_single_tib,
+    c5_fold_tib,
+    rf_single_tib,
+    rf_fold_tib
+  )
+
+res_aucs <-
+  preds_all %>%
+  group_by(model, wrkflw) %>%
   roc_auc(
     truth = Actual,
     no
@@ -121,71 +427,42 @@ c5_auc <-
 
 num_mets <- metric_set(bal_accuracy, kap, sens, spec)
 
-c50_mets <-
+res_mets <-
   bind_rows(
-    c5_auc,
-    c5_single_pred %>%
+    res_aucs,
+    preds_all %>%
+      group_by(model, wrkflw) %>%
       num_mets(Actual, estimate = Predicted)
   )
 
-c5_single_pred %>%
-  roc_curve(
-    truth = Actual,
-    estimate = no
-  ) %>%
-  autoplot()
-
-# use https://www.tidymodels.org/start/tuning/ to tune a tree
-
-
-## Apply the rpart model once
-
-c5_mod <-
-  decision_tree() %>%
-  set_engine("C5.0") %>%
-  set_mode("classification") %>%
-  translate()
-
-c5_workflow <-
-  workflow() %>%
-  add_model(c5_mod) %>%
-  add_recipe(bank_rec)
-
-## step_novel
-
-c5_fit <-
-  c5_workflow %>%
-  fit(data = df_train)
-
-summary(bank_tree_fit)
-
-
-foo_train_recipe <- prep(pre_processor(df_train), training = df_train)
-training_processed <- bake(foo_train_recipe, new_data = df_training)
-
-## cross-validation
-df_train_cvs <-
-  mc_cv(df_baked_train,
-    prop = 0.75,
-    times = 10
+res_mets %>%
+  select(-.estimator) %>%
+  pivot_wider(
+    names_from = c(model, wrkflw),
+    values_from = .estimate
   )
 
 
+## step_novel
 
-nb_mod <-
-  discrim::naive_Bayes() %>%
-  set_engine("naivebayes") %>%
-  translate()
+bank_rf_fit <-
+  bank_rf_workflow %>%
+  fit(data = df_train)
 
-rf_mod <-
-  rand_forest(
-    mtry = 3,
-    trees = 200,
-    min_n = 20
+rf_pred <-
+  predict(bank_rf_fit,
+    df_test,
+    type = "prob"
   ) %>%
-  set_engine("ranger") %>%
-  set_mode("classification")
+  bind_cols(df_test %>% select(y))
 
+rf_pred %>%
+  roc_curve(truth = y, .pred_no) %>%
+  autoplot()
+
+bank_rf_fit %>%
+  pull_workflow_fit() %>%
+  vip()
 
 # bank_nb_workflow <-
 # workflow() %>%
@@ -209,28 +486,6 @@ rf_mod <-
 # autoplot()
 
 # try randomforest
-
-bank_rf_workflow <-
-  workflow() %>%
-  add_model(rf_mod) %>%
-  add_recipe(bank_rec)
-
-## step_novel
-
-bank_rf_fit <-
-  bank_rf_workflow %>%
-  fit(data = df_train)
-
-rf_pred <-
-  predict(bank_rf_fit,
-    df_test,
-    type = "prob"
-  ) %>%
-  bind_cols(df_test %>% select(y))
-
-rf_pred %>%
-  roc_curve(truth = y, .pred_no) %>%
-  autoplot()
 
 
 ## decision tree now
