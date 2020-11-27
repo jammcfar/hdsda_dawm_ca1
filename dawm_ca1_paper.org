@@ -45,7 +45,8 @@ In this section, we will attempt to predict the success of a bank marketing camp
 The dataset chosen was a 10,000 row, random subset of the the well-known Portoguese Bank dataset as described in 
   S. Moro, P. Cortez and P. Rita. A Data-Driven Approach to Predict the Success of Bank Telemarketing. Decision Support Systems (2014), doi:10.1016/j.dss.2014.03.001.
 The goal of this dataset is to predict the classification of successful sales by a bank telemarketing campaign. Note that this analysis is not comparable to the original study, as their are significant differences in the available variables, dataset length and scope.
-This dataset contains a mixture of 20 numeric and categorical variables, with some outliers. Dummy variables were used to handle the categorical variable. See appendix X for more details. The data also displayed a strong class imbalance. These issues influenced our choice of model in the next section.
+This dataset contains a mixture of 20 numeric and categorical variables, with some outliers. Dummifying variables was not necessary as our chosen models can handle multi-level categorical variables  See appendix X for more details. The data also displayed a strong class imbalance. These issues influenced our choice of model in the next section.
+https://www.slidesare.net/Work-Bench/i-dont-want-to-be-a-dummy-encoding-predictors-for-trees
 
 ** Choice of models
 A choice of imputation method could not be justified in this case, so models were chosen based on their efficacy at handling them.
@@ -61,5 +62,20 @@ https://www3.nd.edu/~nchawla/papers/ECML08.pdf
 
 Feature selection actually worsened performance for rpart slightly. At the least, it did not imporve things. Show an example of this in appendix.
 
+The ranger algorithm was used as a Random Forest implementation. It is much faster on multi-core processors.
+
 ** Analysis
-Both models were first ran in a hold-back workflow, with default values for both to establish baselines. They were then both ran a second time, with cross-validation and tuned within the cv folds. Monte-Carlo cross-validation was used as it was not known if the dataset had any original ordering.
+Both C5.0 and Ranger were implemented using the Tidymodels framework.
+## use https://www.tidymodels.org/start/tuning/ to tune a tree
+
+Both were tuned using a Random-search method, which is faster and counter-intuitively often picks better combinations than a grid search https://www.jmlr.org/papers/volume13/bergstra12a/bergstra12a.pdf
+
+
+between best hyperparmeters were then passed 
+Monte-Carlo cross-validation was used as it was not known if the dataset had any original ordering.
+
+For the C5.0 algorithm, only the "min_n" (i.e. minimum number of sample to split) parameter was tuned, as this was all that was allowed by the framework. Tuning set this to 5, and the model retrained over the entire training set produced a tree of with a maximum depth of 6 and incorporating 7 variables (see figure X).
+
+The Ranger algorithm was tuned so that mtry and min_n were set at X and Y respectively. Gini importance was used by default. Trees were set to 500. This could be potentially be lowered, but investigating the OOB error against the number of trees was not possible here. The final model made use of X variables and had an OOB error of 0.079 (see fig X).
+
+A comparison of the C5.0 and ranger models showed that ranger improved upon the C5.0.
