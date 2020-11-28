@@ -30,14 +30,14 @@ package_list <- c(
   "ranger",
   "C50",
   "vip",
-  "parallel"
+  "parallel",
+  "ggpubr"
 )
 
 package_installer(package_list)
 
 # load all packages
 lapply(package_list, library, character.only = T)
-
 
 ## Get n cores for ranger
 cores_found <- parallel::detectCores()
@@ -62,12 +62,22 @@ tidyFolds <- function(fit, model_name) {
 
 ## Data import and pre-processing===============================================
 
+# Download zipped dataset and store as a temporary file
+data_url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/00222/bank-additional.zip"
+
+temp_file <- tempfile()
+
+download.file(data_url, temp_file)
+
 # Read in and downsample bank data.
 df_bank_in <-
-  read_delim(here("bank-additional-full.csv"),
+  read_delim(unz(temp_file, "bank-additional/bank-additional-full.csv"),
     delim = ";"
   ) %>%
   slice_sample(n = 10000)
+
+# Unload from memory
+unlink(temp_file)
 
 # Set colname to snakecase, as per tidy style guide
 colnames(df_bank_in) <- snakecase::to_snake_case(colnames(df_bank_in))
@@ -92,13 +102,31 @@ df_bank_proc <-
   mutate_if(is.character, as.factor) %>%
   distinct()
 
-# Checking for intercorrelations of numerics
-df_bank_proc %>%
+# Checking for intercorrelations of numerics, then tidy and output
+df_cors <-
+  df_bank_proc %>%
   select(where(is.numeric)) %>%
   correlate() %>%
   shave() %>%
   pivot_longer(age:nr_employed) %>%
-  arrange(desc(value))
+  arrange(desc(value)) %>%
+  top_n(5, value) %>%
+  mutate(value = round(value, 3)) %>%
+  rename(
+    `Variable 1` = rowname,
+    `Variable 2` = name,
+    `Pearson's R` = value
+  ) %>%
+  ggtexttable(rows = NULL, theme = ttheme("light"))
+
+ggsave(
+  filename = "bank_cors.png",
+  plot = df_cors,
+  dpi = 300,
+  units = "cm",
+  height = 6,
+  width = 10
+)
 
 
 ## Initial Tidymodels preperations==============================================
@@ -389,8 +417,8 @@ res_aucs <-
     no
   )
 
-# Calc others
-num_mets <- metric_set(bal_accuracy, kap, sens, spec)
+# Calc other metrics
+num_mets <- metric_set(bal_accuracy, kap, sens, spec, ppv, npv)
 
 res_mets <-
   bind_rows(
@@ -409,17 +437,84 @@ metrics_out <-
   pivot_wider(
     names_from = c(model),
     values_from = .estimate
-  )
+  ) %>%
+  mutate_at(c("C5.0", "Ranger"), function(x) {
+    round(x, 3)
+  }) %>%
+  ggtexttable(rows = NULL, theme = ttheme("light"))
+
+ggsave(
+  filename = "model_metrics.png",
+  plot = metrics_out,
+  dpi = 300,
+  units = "cm",
+  height = 6,
+  width = 10
+)
+
 
 ## Do ROC curves
-roc_plot <-
+roc_plot_dat <-
   preds_all %>%
   group_by(model) %>%
   roc_curve(
     truth = Actual,
     no
-  ) %>%
+  )
+
+# Get balanced thresholds
+roc_thresholds <-
+  roc_plot_dat %>%
+  mutate(sp_sn_sum = specificity + sensitivity) %>%
+  arrange(desc(sp_sn_sum)) %>%
+  top_n(1, sp_sn_sum)
+
+# Plot the curves, with balanced SN and SP values
+roc_plot <-
+  roc_plot_dat %>%
   autoplot() +
+  geom_point(
+    data = roc_thresholds,
+    aes(
+      x = 1 - specificity,
+      y = sensitivity,
+      colour = model
+    )
+  ) +
+  geom_text(
+    data = roc_thresholds[1, ],
+    aes(
+      x = 1 - specificity,
+      y = sensitivity,
+      colour = model,
+      label = paste(
+        "SN = ",
+        round(sensitivity, 3),
+        "\nSP = ",
+        round(specificity, 3)
+      )
+    ),
+    vjust = 0.5,
+    hjust = 1.25,
+    size = 3
+  ) +
+  geom_text(
+    data = roc_thresholds[2, ],
+    aes(
+      x = 1 - specificity,
+      y = sensitivity,
+      colour = model,
+      label = paste(
+        "SN = ",
+        round(sensitivity, 3),
+        "\nSP = ",
+        round(specificity, 3)
+      )
+    ),
+    vjust = 1,
+    hjust = -0.2,
+    size = 3
+  ) +
   scale_colour_manual("Model",
     values = c("#BD6B31", "#3182BD")
   ) +
