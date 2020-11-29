@@ -337,7 +337,7 @@ rf_tune_plot <-
   ),
   width = 0.3
   ) +
-  coord_cartesian(ylim = c(0.75, 0.8)) +
+  coord_cartesian(ylim = c(0.6, 0.8)) +
   theme_classic() +
   labs(
     y = "Mean AUC",
@@ -408,6 +408,88 @@ preds_all <-
     rf_pred_tib
   )
 
+
+## Do ROC curves
+roc_plot_dat <-
+  preds_all %>%
+  group_by(model) %>%
+  roc_curve(
+    truth = Actual,
+    no
+  )
+
+# Get better thresholds based on geometric mean
+roc_thresholds <-
+  roc_plot_dat %>%
+  mutate(g_mean = sqrt(specificity * sensitivity)) %>%
+  arrange(desc(g_mean)) %>%
+  top_n(1, g_mean)
+
+
+# Plot the curves, highlighting optimal thresholds
+roc_plot <-
+  roc_plot_dat %>%
+  autoplot() +
+  geom_point(
+    data = roc_thresholds,
+    aes(
+      x = 1 - specificity,
+      y = sensitivity,
+      colour = model
+    )
+  ) +
+  geom_text(
+    data = roc_thresholds[1, ],
+    aes(
+      x = 1 - specificity,
+      y = sensitivity,
+      colour = model,
+      label = paste(
+        "TH: ",
+        round(.threshold, 3),
+        "\nSN: ",
+        round(sensitivity, 3),
+        "\nSP: ",
+        round(specificity, 3)
+      )
+    ),
+    vjust = 0.5,
+    hjust = 1.25,
+    size = 3
+  ) +
+  geom_text(
+    data = roc_thresholds[2, ],
+    aes(
+      x = 1 - specificity,
+      y = sensitivity,
+      colour = model,
+      label = paste(
+        "TH: ",
+        round(.threshold, 3),
+        "\nSN: ",
+        round(sensitivity, 3),
+        "\nSP: ",
+        round(specificity, 3)
+      )
+    ),
+    vjust = 1,
+    hjust = -0.2,
+    size = 3
+  ) +
+  scale_colour_manual("Model",
+    values = c("#BD6B31", "#3182BD")
+  ) +
+  labs(x = "1 - Specificity", y = "Sensitivity")
+
+ggsave(
+  filename = "roc_plot.png",
+  plot = roc_plot,
+  dpi = 300,
+  units = "cm",
+  height = 8,
+  width = 12
+)
+
 # Calc AUC
 res_aucs <-
   preds_all %>%
@@ -417,13 +499,26 @@ res_aucs <-
     no
   )
 
+# For other metrics, recalculate predicted classifications
+preds_adjusted <-
+  preds_all %>%
+  select(-Predicted) %>%
+  left_join(roc_thresholds, by = c("model" = "model")) %>%
+  select(-specificity, -sensitivity, -g_mean) %>%
+  mutate(Predicted = case_when(
+    no >= .threshold ~ "no",
+    TRUE ~ "yes"
+  )) %>%
+  mutate(Predicted = as_factor(Predicted))
+
+
 # Calc other metrics
-num_mets <- metric_set(bal_accuracy, kap, sens, spec, ppv, npv)
+kum_mets <- metric_set(bal_accuracy, kap, sens, spec, ppv, npv)
 
 res_mets <-
   bind_rows(
     res_aucs,
-    preds_all %>%
+    preds_adjusted %>%
       group_by(model) %>%
       num_mets(Actual, estimate = Predicted)
   )
@@ -452,86 +547,9 @@ ggsave(
   width = 10
 )
 
-
-## Do ROC curves
-roc_plot_dat <-
-  preds_all %>%
-  group_by(model) %>%
-  roc_curve(
-    truth = Actual,
-    no
-  )
-
-# Get balanced thresholds
-roc_thresholds <-
-  roc_plot_dat %>%
-  mutate(sp_sn_sum = specificity + sensitivity) %>%
-  arrange(desc(sp_sn_sum)) %>%
-  top_n(1, sp_sn_sum)
-
-# Plot the curves, with balanced SN and SP values
-roc_plot <-
-  roc_plot_dat %>%
-  autoplot() +
-  geom_point(
-    data = roc_thresholds,
-    aes(
-      x = 1 - specificity,
-      y = sensitivity,
-      colour = model
-    )
-  ) +
-  geom_text(
-    data = roc_thresholds[1, ],
-    aes(
-      x = 1 - specificity,
-      y = sensitivity,
-      colour = model,
-      label = paste(
-        "SN = ",
-        round(sensitivity, 3),
-        "\nSP = ",
-        round(specificity, 3)
-      )
-    ),
-    vjust = 0.5,
-    hjust = 1.25,
-    size = 3
-  ) +
-  geom_text(
-    data = roc_thresholds[2, ],
-    aes(
-      x = 1 - specificity,
-      y = sensitivity,
-      colour = model,
-      label = paste(
-        "SN = ",
-        round(sensitivity, 3),
-        "\nSP = ",
-        round(specificity, 3)
-      )
-    ),
-    vjust = 1,
-    hjust = -0.2,
-    size = 3
-  ) +
-  scale_colour_manual("Model",
-    values = c("#BD6B31", "#3182BD")
-  ) +
-  labs(x = "1 - Specificity", y = "Sensitivity")
-
-ggsave(
-  filename = "roc_plot.png",
-  plot = roc_plot,
-  dpi = 300,
-  units = "cm",
-  height = 8,
-  width = 12
-)
-
 # Do confusion matrices (manually, framework doesnt support %'s)
 conf_tidy <-
-  preds_all %>%
+  preds_adjusted %>%
   group_by(model) %>%
   count(Actual, Predicted) %>%
   group_by(model, Predicted) %>%
